@@ -1,0 +1,36 @@
+{
+  "name": "burrata-pos",
+  "version": "1.0.0",
+  "description": "Burrata POS Terminal",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build:win": "electron-builder --win --x64",
+    "publish:win": "electron-builder --win --x64 --publish always"
+  },
+  "devDependencies": {
+    "electron": "^34.0.0",
+    "electron-builder": "^25.0.0"
+  },
+  "build": {
+    "appId": "com.burrata.pos",
+    "productName": "Burrata POS",
+    "publish": {
+      "provider": "github",
+      "releaseType": "release"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": true,
+      "installerIcon": "assets/icon.ico",
+      "artifactName": "Burrata-POS-Setup.exe"
+    },
+    "directories": {
+      "output": "dist"
+    }
+  }
+}
