@@ -20,13 +20,11 @@
       "releaseType": "release"
     },
     "win": {
-      "target": "nsis",
-      "icon": "assets/icon.ico"
+      "target": "nsis"
     },
     "nsis": {
       "oneClick": true,
       "perMachine": true,
-      "installerIcon": "assets/icon.ico",
       "artifactName": "Burrata-POS-Setup.exe"
     },
     "directories": {
