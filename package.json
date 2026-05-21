@@ -3,6 +3,10 @@
   "version": "1.0.0",
   "description": "Burrata POS Terminal",
   "main": "main.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/burratapos/burrata-pos-electron.git"
+  },
   "scripts": {
     "start": "electron .",
     "build:win": "electron-builder --win --x64",
@@ -17,6 +21,8 @@
     "productName": "Burrata POS",
     "publish": {
       "provider": "github",
+      "owner": "burratapos",
+      "repo": "burrata-pos-electron",
       "releaseType": "release"
     },
     "win": {
@@ -24,7 +30,7 @@
     },
     "nsis": {
       "oneClick": true,
-      "perMachine": true,
+      "perMachine": false,
       "artifactName": "Burrata-POS-Setup.exe"
     },
     "directories": {
