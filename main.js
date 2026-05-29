@@ -1,4 +1,4 @@
-const { app, BrowserWindow, globalShortcut, ipcMain } = require("electron")
+const { app, BrowserWindow, globalShortcut, ipcMain, dialog } = require("electron")
 const { exec } = require("child_process")
 const path = require("path")
 const fs   = require("fs")
@@ -56,13 +56,13 @@ ipcMain.handle("get-printers", async () => {
 })
 
 // ── IPC: print HTML to a named Windows printer ───────────────────────────────
-// Creates an offscreen window, loads the HTML, prints silently, destroys window.
-// ── IPC: print HTML to a named Windows printer ───────────────────────────────
 // Step 1: Render HTML → PDF via Chromium (printToPDF never blocks/hangs).
 // Step 2: Write PDF to temp file.
 // Step 3: Print via PowerShell Start-Process PrintTo verb (uses Windows built-in
 //         PDF association — Edge on Win10/11 — to send silently to named printer).
 ipcMain.handle("print-html", async (_event, printerName, html) => {
+  console.log(`[print-html] START — printer: "${printerName}"`)
+
   // ── Render to PDF ──────────────────────────────────────────────────────────
   const win = new BrowserWindow({
     show: false,
@@ -75,13 +75,16 @@ ipcMain.handle("print-html", async (_event, printerName, html) => {
   let pdfBuffer
   try {
     const base64 = Buffer.from(html).toString("base64")
+    console.log(`[print-html] Loading HTML (${html.length} chars)...`)
     await win.loadURL(`data:text/html;base64,${base64}`)
-    await new Promise(r => setTimeout(r, 500)) // let Chromium finish painting
+    await new Promise(r => setTimeout(r, 500))
+    console.log(`[print-html] Generating PDF via printToPDF...`)
     pdfBuffer = await win.webContents.printToPDF({
       pageSize: { width: 80000, height: 297000 }, // 80mm wide, microns
       printBackground: true,
       margins: { marginType: "none" },
     })
+    console.log(`[print-html] PDF generated: ${pdfBuffer.length} bytes`)
   } finally {
     if (!win.isDestroyed()) win.destroy()
   }
@@ -89,6 +92,7 @@ ipcMain.handle("print-html", async (_event, printerName, html) => {
   // ── Write temp PDF ─────────────────────────────────────────────────────────
   const tmpPdf = path.join(os.tmpdir(), `burrata-receipt-${Date.now()}.pdf`)
   fs.writeFileSync(tmpPdf, pdfBuffer)
+  console.log(`[print-html] Temp PDF written: ${tmpPdf}`)
 
   // ── Print via PowerShell ───────────────────────────────────────────────────
   const esc = (s) => s.replace(/\\/g, "\\\\").replace(/'/g, "''")
@@ -99,21 +103,29 @@ ipcMain.handle("print-html", async (_event, printerName, html) => {
     `Start-Sleep -Seconds 3`,
   ].join("; ")
 
+  console.log(`[print-html] Running PowerShell PrintTo...`)
+
   return new Promise((resolve, reject) => {
     const cleanup = () => { try { fs.unlinkSync(tmpPdf) } catch {} }
     const timeout = setTimeout(() => {
       cleanup()
+      console.error(`[print-html] TIMEOUT after 30s`)
       reject(new Error("Print timed out — check the printer is online."))
     }, 30000)
 
     exec(
       `powershell -NoProfile -NonInteractive -WindowStyle Hidden -Command "${psCmd}"`,
       { timeout: 35000 },
-      (error, _stdout, stderr) => {
+      (error, stdout, stderr) => {
         clearTimeout(timeout)
         cleanup()
-        if (error) reject(new Error(`Print failed: ${stderr || error.message}`))
-        else resolve(true)
+        if (error) {
+          console.error(`[print-html] PowerShell ERROR: ${stderr || error.message}`)
+          reject(new Error(`Print failed: ${stderr || error.message}`))
+        } else {
+          console.log(`[print-html] SUCCESS — stdout: ${stdout}`)
+          resolve(true)
+        }
       }
     )
   })
@@ -127,8 +139,12 @@ app.whenReady().then(() => {
 
   // Version check — Ctrl+Shift+V shows current version in a dialog
   globalShortcut.register("CommandOrControl+Shift+V", () => {
-    const { dialog } = require("electron")
     dialog.showMessageBox({ title: "Burrata POS", message: `Version: ${app.getVersion()}\nElectron: ${process.versions.electron}` })
+  })
+
+  // DevTools — Ctrl+Shift+I opens browser console (admin debug only)
+  globalShortcut.register("CommandOrControl+Shift+I", () => {
+    if (mainWin) mainWin.webContents.openDevTools({ mode: "detach" })
   })
 
   app.on("activate", () => {
