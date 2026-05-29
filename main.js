@@ -59,8 +59,7 @@ ipcMain.handle("print-html", async (_event, printerName, html) => {
     show: false,
     width: 400,
     height: 800,
-    // Required for Chromium to render content in a hidden window
-    paintWhenInitiallyHidden: true,
+    paintWhenInitiallyHidden: true, // forces layout even in hidden window
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -68,17 +67,14 @@ ipcMain.handle("print-html", async (_event, printerName, html) => {
   })
 
   try {
-    // Inject HTML directly — more reliable than data: URI for large receipts
-    await win.loadURL("about:blank")
-    await win.webContents.executeJavaScript(
-      `document.open(); document.write(${JSON.stringify(html)}); document.close();`
-    )
+    // base64 data URI — no filesystem, no path encoding issues, works everywhere
+    const base64 = Buffer.from(html).toString("base64")
+    await win.loadURL(`data:text/html;base64,${base64}`)
 
-    // Give Chromium ~500ms to fully paint before sending to printer
+    // Give Chromium 500ms to finish painting before sending to spooler
     await new Promise(resolve => setTimeout(resolve, 500))
 
     return await new Promise((resolve, reject) => {
-      // Safety timeout — printer callback can hang if device is offline/misconfigured
       const timeout = setTimeout(() => {
         if (!win.isDestroyed()) win.destroy()
         reject(new Error("Print timed out — check that the printer is online and the name is correct."))
@@ -90,6 +86,7 @@ ipcMain.handle("print-html", async (_event, printerName, html) => {
           silent: true,
           printBackground: true,
           margins: { marginType: "none" },
+          pageSize: { width: 80000, height: 297000 }, // 80mm wide, microns
         },
         (success, failureReason) => {
           clearTimeout(timeout)
