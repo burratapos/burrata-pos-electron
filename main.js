@@ -1,5 +1,8 @@
 const { app, BrowserWindow, globalShortcut, ipcMain } = require("electron")
+const { exec } = require("child_process")
 const path = require("path")
+const fs   = require("fs")
+const os   = require("os")
 
 const POS_URL          = "https://burrata-pos.vercel.app/pos"
 const PRINT_WORKER_URL = "https://burrata-pos.vercel.app/pos/print-worker"
@@ -54,52 +57,66 @@ ipcMain.handle("get-printers", async () => {
 
 // ── IPC: print HTML to a named Windows printer ───────────────────────────────
 // Creates an offscreen window, loads the HTML, prints silently, destroys window.
+// ── IPC: print HTML to a named Windows printer ───────────────────────────────
+// Step 1: Render HTML → PDF via Chromium (printToPDF never blocks/hangs).
+// Step 2: Write PDF to temp file.
+// Step 3: Print via PowerShell Start-Process PrintTo verb (uses Windows built-in
+//         PDF association — Edge on Win10/11 — to send silently to named printer).
 ipcMain.handle("print-html", async (_event, printerName, html) => {
+  // ── Render to PDF ──────────────────────────────────────────────────────────
   const win = new BrowserWindow({
     show: false,
     width: 400,
     height: 800,
-    paintWhenInitiallyHidden: true, // forces layout even in hidden window
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-    },
+    paintWhenInitiallyHidden: true,
+    webPreferences: { nodeIntegration: false, contextIsolation: true },
   })
 
+  let pdfBuffer
   try {
-    // base64 data URI — no filesystem, no path encoding issues, works everywhere
     const base64 = Buffer.from(html).toString("base64")
     await win.loadURL(`data:text/html;base64,${base64}`)
-
-    // Give Chromium 500ms to finish painting before sending to spooler
-    await new Promise(resolve => setTimeout(resolve, 500))
-
-    return await new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        if (!win.isDestroyed()) win.destroy()
-        reject(new Error("Print timed out — check that the printer is online and the name is correct."))
-      }, 15000)
-
-      win.webContents.print(
-        {
-          deviceName: printerName,
-          silent: true,
-          printBackground: true,
-          margins: { marginType: "none" },
-          pageSize: { width: 80000, height: 297000 }, // 80mm wide, microns
-        },
-        (success, failureReason) => {
-          clearTimeout(timeout)
-          if (!win.isDestroyed()) win.destroy()
-          if (success) resolve(true)
-          else reject(new Error(failureReason || "Print failed — check printer name and status."))
-        }
-      )
+    await new Promise(r => setTimeout(r, 500)) // let Chromium finish painting
+    pdfBuffer = await win.webContents.printToPDF({
+      pageSize: { width: 80000, height: 297000 }, // 80mm wide, microns
+      printBackground: true,
+      margins: { marginType: "none" },
     })
-  } catch (err) {
+  } finally {
     if (!win.isDestroyed()) win.destroy()
-    throw err
   }
+
+  // ── Write temp PDF ─────────────────────────────────────────────────────────
+  const tmpPdf = path.join(os.tmpdir(), `burrata-receipt-${Date.now()}.pdf`)
+  fs.writeFileSync(tmpPdf, pdfBuffer)
+
+  // ── Print via PowerShell ───────────────────────────────────────────────────
+  const esc = (s) => s.replace(/\\/g, "\\\\").replace(/'/g, "''")
+  const psCmd = [
+    `$pdf = '${esc(tmpPdf)}'`,
+    `$prn = '${esc(printerName)}'`,
+    `Start-Process -FilePath $pdf -Verb PrintTo -ArgumentList $prn -Wait`,
+    `Start-Sleep -Seconds 3`,
+  ].join("; ")
+
+  return new Promise((resolve, reject) => {
+    const cleanup = () => { try { fs.unlinkSync(tmpPdf) } catch {} }
+    const timeout = setTimeout(() => {
+      cleanup()
+      reject(new Error("Print timed out — check the printer is online."))
+    }, 30000)
+
+    exec(
+      `powershell -NoProfile -NonInteractive -WindowStyle Hidden -Command "${psCmd}"`,
+      { timeout: 35000 },
+      (error, _stdout, stderr) => {
+        clearTimeout(timeout)
+        cleanup()
+        if (error) reject(new Error(`Print failed: ${stderr || error.message}`))
+        else resolve(true)
+      }
+    )
+  })
 })
 
 app.whenReady().then(() => {
