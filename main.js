@@ -59,30 +59,50 @@ ipcMain.handle("print-html", async (_event, printerName, html) => {
     show: false,
     width: 400,
     height: 800,
+    // Required for Chromium to render content in a hidden window
+    paintWhenInitiallyHidden: true,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
     },
   })
 
-  // Load HTML via data URI — Chromium handles it cleanly for typical receipt sizes
-  await win.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(html))
-
-  return new Promise((resolve, reject) => {
-    win.webContents.print(
-      {
-        deviceName: printerName,
-        silent: true,
-        printBackground: true,
-        margins: { marginType: "none" },
-      },
-      (success, failureReason) => {
-        win.destroy()
-        if (success) resolve(true)
-        else reject(new Error(failureReason || "Print failed"))
-      }
+  try {
+    // Inject HTML directly — more reliable than data: URI for large receipts
+    await win.loadURL("about:blank")
+    await win.webContents.executeJavaScript(
+      `document.open(); document.write(${JSON.stringify(html)}); document.close();`
     )
-  })
+
+    // Give Chromium ~500ms to fully paint before sending to printer
+    await new Promise(resolve => setTimeout(resolve, 500))
+
+    return await new Promise((resolve, reject) => {
+      // Safety timeout — printer callback can hang if device is offline/misconfigured
+      const timeout = setTimeout(() => {
+        if (!win.isDestroyed()) win.destroy()
+        reject(new Error("Print timed out — check that the printer is online and the name is correct."))
+      }, 15000)
+
+      win.webContents.print(
+        {
+          deviceName: printerName,
+          silent: true,
+          printBackground: true,
+          margins: { marginType: "none" },
+        },
+        (success, failureReason) => {
+          clearTimeout(timeout)
+          if (!win.isDestroyed()) win.destroy()
+          if (success) resolve(true)
+          else reject(new Error(failureReason || "Print failed — check printer name and status."))
+        }
+      )
+    })
+  } catch (err) {
+    if (!win.isDestroyed()) win.destroy()
+    throw err
+  }
 })
 
 app.whenReady().then(() => {
