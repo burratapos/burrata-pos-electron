@@ -125,6 +125,12 @@ app.whenReady().then(() => {
   // Admin escape hatch — Ctrl+Shift+Q exits the kiosk
   globalShortcut.register("CommandOrControl+Shift+Q", () => app.quit())
 
+  // Version check — Ctrl+Shift+V shows current version in a dialog
+  globalShortcut.register("CommandOrControl+Shift+V", () => {
+    const { dialog } = require("electron")
+    dialog.showMessageBox({ title: "Burrata POS", message: `Version: ${app.getVersion()}\nElectron: ${process.versions.electron}` })
+  })
+
   app.on("activate", () => {
     if (!mainWin) createWindows()
   })

@@ -1,6 +1,6 @@
 {
   "name": "burrata-pos",
-  "version": "1.0.0",
+  "version": "1.0.7",
   "description": "Burrata POS Terminal",
   "main": "main.js",
   "repository": {
