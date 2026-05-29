@@ -1,14 +1,11 @@
 const { app, BrowserWindow, globalShortcut, ipcMain, dialog } = require("electron")
 const path = require("path")
 
-const POS_URL          = "https://burrata-pos.vercel.app/pos"
-const PRINT_WORKER_URL = "https://burrata-pos.vercel.app/pos/print-worker"
+const POS_URL = "https://burrata-pos.vercel.app/pos"
 
-let mainWin       = null
-let printWorkerWin = null
+let mainWin = null
 
 function createWindows() {
-  // ── Main kiosk window ────────────────────────────────────────────────────────
   mainWin = new BrowserWindow({
     fullscreen: true,
     kiosk: true,
@@ -23,29 +20,11 @@ function createWindows() {
 
   mainWin.loadURL(POS_URL)
   mainWin.on("closed", () => { mainWin = null })
-
-  // ── Hidden print worker window ───────────────────────────────────────────────
-  // Runs /pos/print-worker in the background. Shares the same Chromium session
-  // (cookies / localStorage) as the main window, so it becomes authenticated
-  // automatically when the staff member logs in on the main screen.
-  printWorkerWin = new BrowserWindow({
-    show: false,
-    width: 1,
-    height: 1,
-    webPreferences: {
-      preload: path.join(__dirname, "preload.js"),
-      nodeIntegration: false,
-      contextIsolation: true,
-    },
-  })
-
-  printWorkerWin.loadURL(PRINT_WORKER_URL)
-  printWorkerWin.on("closed", () => { printWorkerWin = null })
 }
 
 // ── IPC: list installed Windows printers ─────────────────────────────────────
 ipcMain.handle("get-printers", async () => {
-  const win = mainWin || BrowserWindow.getAllWindows()[0]
+  const win = mainWin
   if (!win) return []
   const list = await win.webContents.getPrintersAsync()
   // Return only what the renderer needs
